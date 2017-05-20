@@ -13,6 +13,8 @@ trait CoreplexNetwork extends HasCoreplexParameters {
   val module: CoreplexNetworkModule
   def bindingTree: ResourceMap
 
+  val tile_splitter = LazyModule(new TLSplitter)
+
   val l1tol2 = LazyModule(new TLXbar)
   val l1tol2_beatBytes = l1tol2Config.beatBytes
   val l1tol2_lineBytes = p(CacheBlockBytes)
@@ -34,6 +36,7 @@ trait CoreplexNetwork extends HasCoreplexParameters {
   private val l2in_buffer = LazyModule(new TLBuffer)
   private val l2in_fifo = LazyModule(new TLFIFOFixer)
   l1tol2.node :=* l2in_fifo.node
+  l1tol2.node :=* tile_splitter.node
   l2in_fifo.node :=* l2in_buffer.node
   l2in_buffer.node :=* l2in
 
@@ -83,7 +86,7 @@ trait CoreplexNetwork extends HasCoreplexParameters {
   }
 
   ResourceBinding {
-    val managers = l1tol2.node.edgesIn.headOption.map(_.manager.managers).getOrElse(Nil)
+    val managers = tile_splitter.node.edgesIn.headOption.map(_.manager.managers).getOrElse(Nil)
     val max = managers.flatMap(_.address).map(_.max).max
     val width = ResourceInt((log2Ceil(max)+31) / 32)
     Resource(root, "width").bind(width)
@@ -113,7 +116,7 @@ trait CoreplexNetworkModule extends HasCoreplexParameters {
   val io: CoreplexNetworkBundle
 
   println("Generated Address Map")
-  for (manager <- outer.l1tol2.node.edgesIn(0).manager.managers) {
+  for (manager <- outer.tile_splitter.node.edgesIn.headOption.map(_.manager.managers).getOrElse(Nil)) {
     val prot = (if (manager.supportsGet)     "R" else "") +
                (if (manager.supportsPutFull) "W" else "") +
                (if (manager.executable)      "X" else "") +
