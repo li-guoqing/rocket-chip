@@ -393,14 +393,27 @@ class FPToInt(implicit p: Parameters) extends FPUModule()(p) {
     when (!in.ren2) { // fcvt
       val minXLen = 32
       val n = log2Ceil(xLen/minXLen) + 1
-      for (i <- 0 until n) {
-        val conv = Module(new hardfloat.RecFNToIN(maxExpWidth, maxSigWidth, minXLen << i))
-        conv.io.in := in.in1
-        conv.io.roundingMode := in.rm
-        conv.io.signedOut := ~in.typ(0)
+
+      val conv = Module(new hardfloat.RecFNToIN(maxExpWidth, maxSigWidth, xLen))
+      conv.io.in := in.in1
+      conv.io.roundingMode := in.rm
+      conv.io.signedOut := ~in.typ(0)
+      io.out.bits.toint := conv.io.out
+      io.out.bits.exc := Cat(conv.io.intExceptionFlags(2, 1).orR, UInt(0, 3), conv.io.intExceptionFlags(0))
+
+      for (i <- 0 until n-1) {
         when (in.typ.extract(log2Ceil(n), 1) === i) {
-          io.out.bits.toint := conv.io.out.sextTo(xLen)
-          io.out.bits.exc := Cat(conv.io.intExceptionFlags(2, 1).orR, UInt(0, 3), conv.io.intExceptionFlags(0))
+          val intWidth = minXLen << i
+          val narrow = Module(new hardfloat.RecFNToIN(maxExpWidth, maxSigWidth, intWidth))
+          narrow.io.in := in.in1
+          narrow.io.roundingMode := in.rm
+          narrow.io.signedOut := ~in.typ(0)
+
+          val excSign = in.in1(maxExpWidth + maxSigWidth) && !maxType.isNaN(in.in1)
+          val excOut = Cat(conv.io.signedOut === excSign, Fill(intWidth-1, !excSign))
+          val invalid = conv.io.intExceptionFlags(2) || narrow.io.intExceptionFlags(1)
+          io.out.bits.toint := Mux(invalid, excOut, conv.io.out(intWidth-1, 0)).sextTo(xLen)
+          io.out.bits.exc := Cat(invalid, UInt(0, 3), !invalid && conv.io.intExceptionFlags(0))
         }
       }
     }
